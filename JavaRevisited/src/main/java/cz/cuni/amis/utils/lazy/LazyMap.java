@@ -1,6 +1,7 @@
 package cz.cuni.amis.utils.lazy;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -30,6 +31,14 @@ import java.util.Set;
  */
 public abstract class LazyMap<K, V> implements Map<K, V> {
 
+    /*
+    This implementation locks on only one object which makes parallel access to different keys impossible.
+    It is known limitation that could be solved trough a number of ways, all of which, however, have different trade-offs.
+    This approach was chosen due to implementation simplicity.
+     */
+    private Object obj;
+    private Map<K, V> store;
+
     /**
      * Creates value for given key. THREAD-SAFE!
      * @param key
@@ -38,31 +47,29 @@ public abstract class LazyMap<K, V> implements Map<K, V> {
     protected abstract V create(K key);
 
     public LazyMap() {
-        // TODO: implement me!
+        store = new HashMap<K, V>();
+        obj = new Object();
     }
 
     @Override
     public int size() {
-    	// TODO: implement me!
-    	return 0;
+        return store.size();
     }
 
     @Override
     public boolean isEmpty() {
-    	// TODO: implement me!
-        return true;
+        return store.isEmpty();
     }
 
     @Override
     public boolean containsKey(Object key) {
-    	// TODO: implement me!
-    	return false;
+        return store.containsKey(key);
+
     }
 
     @Override
     public boolean containsValue(Object value) {
-    	// TODO: implement me!
-    	return false;
+        return store.containsValue(value);
     }
 
     /**
@@ -70,30 +77,52 @@ public abstract class LazyMap<K, V> implements Map<K, V> {
      */
     @Override
     public V get(Object key) {
-        // TODO: implement me!
-    	return null;
+
+        // Not sure if there's a better way to handle this (other than having Try and Catch for InvalidCastEx)
+        K k = (K)key;
+        V val;
+
+        synchronized (obj){
+            if(!store.containsKey(k)){
+                val = create(k);
+                val = store.put(k, val);
+            }
+            else {
+                val = store.get(k);
+            }
+        }
+
+        return val;
     }
 
     @Override
     public V put(K key, V value) {
-    	// TODO: implement me!
-    	return null;
+        V val;
+        synchronized (obj){
+    	    val = store.put(key, value);
+        }
+        return val;
     }
 
     @Override
     public V remove(Object key) {
-    	// TODO: implement me!
-        return null;
+        V val;
+        synchronized (obj){
+            val = store.remove(key);
+        }
+        return val;
     }
 
     @Override
     public void putAll(Map<? extends K, ? extends V> m) {
-    	// TODO: implement me!
+        synchronized (obj){
+            store.putAll(m);
+        }
     }
 
     @Override
     public void clear() {
-    	// TODO: implement me!
+    	store.clear();
     }
 
     /**
@@ -101,8 +130,7 @@ public abstract class LazyMap<K, V> implements Map<K, V> {
      */
     @Override
     public Set<K> keySet() {
-    	// TODO: implement me!
-    	return null;
+    	return store.keySet();
     }
 
     /**
@@ -110,8 +138,7 @@ public abstract class LazyMap<K, V> implements Map<K, V> {
      */
     @Override
     public Collection<V> values() {
-    	// TODO: implement me!
-    	return null;
+        return store.values();
     }
 
     /**
@@ -119,8 +146,7 @@ public abstract class LazyMap<K, V> implements Map<K, V> {
      */
     @Override
     public Set<Entry<K, V>> entrySet() {
-    	// TODO: implement me!
-    	return null;
+        return store.entrySet();
     }
 
 }

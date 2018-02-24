@@ -20,8 +20,21 @@ public abstract class Lazy<T> {
      * @return
      */
     public T get() {
-    	// TODO: implement me!
-    	return null;
+        // Let's try fast path without any synchronization
+        if (initialized) { return constructedObject;}
+
+        synchronized (O){
+            if(!initialized) {
+                constructedObject = create();
+                initialized = true;
+            }
+        }
+        return constructedObject;
     }
-    
+
+    private Object O = new Object();
+    private T constructedObject = null;
+    private boolean initialized = false;
+
+
 }

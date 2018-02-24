@@ -15,30 +15,63 @@ import java.util.NoSuchElementException;
  * @param <NODE>
  */
 public class Iterators<NODE> implements Iterator<NODE> {
-	
+	int currentIteratorIndex;
+	Iterator<NODE>[] iterators;
+
 	/**
 	 * Initialize this class to use "iterators" in the order as they are passed into the constructor.
 	 * @param iterators may contain nulls
 	 */
 	public Iterators(Iterator<NODE>... iterators) {
-		// TODO: implement me!
+		this.iterators = iterators;
+		currentIteratorIndex = 0;
 	}
 	
 	@Override
 	public boolean hasNext() {
-		// TODO: implement me!
+
+		// save original iterator index, try to move to next element, restore it to original state
+		// (a remove might want to remove the element returned by the last 'next()'.
+		int originalIteratorIndex = this.currentIteratorIndex;
+	    boolean isThereNextOnNextValidIterator = moveToNextValidIterator();
+	    this.currentIteratorIndex = originalIteratorIndex;
+
+		return isThereNextOnNextValidIterator;
+
+	}
+
+	private boolean moveToNextValidIterator() {
+
+		while(currentIteratorIndex < iterators.length) {
+			if (iterators[currentIteratorIndex] != null && iterators[currentIteratorIndex].hasNext()) {
+				return true;
+			}
+			currentIteratorIndex++;
+		}
+
 		return false;
 	}
 
 	@Override
 	public NODE next() {
-		// TODO: implement me!
-		return null;
+
+		if(moveToNextValidIterator()){
+		 	return iterators[currentIteratorIndex].next();
+		}
+
+		throw new NoSuchElementException("No next element in Iterator");
 	}
 
 	@Override
 	public void remove() {
-		// TODO: implement me!
+		if(!isValidIteratorSelected()) {
+			throw new IllegalStateException("No element to remove.");
+		}
+		iterators[currentIteratorIndex].remove();
+	}
+
+	private boolean isValidIteratorSelected(){
+		return (currentIteratorIndex < iterators.length && iterators[currentIteratorIndex] != null);
 	}
 
 }

@@ -13,9 +13,16 @@ public class SafeEquals {
 	 * @param o2 may be null
 	 * @return
 	 */
-	public static boolean equals(Object o1, Object o2) {		
-		// TODO: implement me
-		return true;
+	public static boolean equals(Object o1, Object o2) {
+		if(o1 == null && o2 == null){
+			return true;
+		}
+		else if( o1 == null ^ o2 == null){
+			return false;
+		}
+		else {
+			return o1 == o2;
+		}
 	}
 
 }

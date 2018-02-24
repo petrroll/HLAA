@@ -7,7 +7,7 @@ public class NullCheck {
 	 * @param obj
 	 */
 	public static void check(Object obj) {
-		// TODO: implement me
+		if(obj == null) { throw new IllegalArgumentException("Argument obj is null."); }
 	}
 
 }
