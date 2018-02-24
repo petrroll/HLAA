@@ -1,6 +1,10 @@
 package cz.cuni.amis.utils.listener;
 
+import java.lang.ref.WeakReference;
 import java.util.EventListener;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * This object is implementing listeners list, where you may store both type of references to 
@@ -19,7 +23,24 @@ import java.util.EventListener;
  * @author Jimmy
  */
 public class Listeners<Listener extends EventListener> {	
-	
+
+    // We could (and we probably should) do a more fine grained locking
+    // since the purpose of this assignment is to teach us about weak reference, however,
+    // it was decided to not to bother.
+    Object lckWk;
+    Object lckSt;
+
+    LinkedList<Listener> strongListeners;
+    LinkedList<WeakReference<Listener>> weakListeners;
+
+    public Listeners(){
+        strongListeners = new LinkedList<Listener>();
+        weakListeners = new LinkedList<WeakReference<Listener>>();
+
+        lckWk = new Object();
+        lckSt = new Object();
+    }
+
 	/**
 	 * Used to raise the event in the listeners.
 	 * 
@@ -40,7 +61,9 @@ public class Listeners<Listener extends EventListener> {
      * @param listener
      */
     public void addStrongListener(Listener listener) {
-    	// TODO: implement me!
+        synchronized (lckSt){
+            strongListeners.add(listener);
+        }
     }
     
     /**
@@ -48,7 +71,9 @@ public class Listeners<Listener extends EventListener> {
      * @param listener
      */
     public void addWeakListener(Listener listener) {
-    	// TODO: implement me!
+        synchronized (lckWk){
+            weakListeners.add(new WeakReference<Listener>(listener));
+        }
     }
     
     /**
@@ -57,8 +82,39 @@ public class Listeners<Listener extends EventListener> {
      * @return how many listeners were removed
      */
     public int removeListener(EventListener listener) {
-    	// TODO: implement me!
-    	return 0;
+        int numberOfRemoved = 0;
+
+        synchronized (lckSt) {
+            Iterator<Listener> iter = strongListeners.iterator();
+            while (iter.hasNext()) {
+
+                Listener list = iter.next();
+                if(list == listener) {
+                    iter.remove();
+                    numberOfRemoved++;
+                }
+
+            }
+        }
+
+        synchronized (lckWk){
+            Iterator<WeakReference<Listener>> iter = weakListeners.iterator();
+            while (iter.hasNext()) {
+
+                WeakReference<Listener> listRef = iter.next();
+                Listener list = listRef.get();
+
+                if(list == listener) {
+                    iter.remove();
+                    numberOfRemoved++;
+                } else if(list == null) {
+                    iter.remove();
+                }
+
+            }
+        }
+
+    	return numberOfRemoved;
     }
     
     /**
@@ -68,7 +124,27 @@ public class Listeners<Listener extends EventListener> {
      * @param notifier
      */
     public void notify(ListenerNotifier<Listener> notifier) {
-    	// TODO: implement me!    	    	
+        synchronized (lckSt){
+            for (Listener list:strongListeners) {
+                notifier.notify(list);
+            }
+        }
+
+        synchronized (lckWk){
+            Iterator<WeakReference<Listener>> iter = weakListeners.iterator();
+            while (iter.hasNext()) {
+
+                WeakReference<Listener> listRef = iter.next();
+                Listener list = listRef.get();
+
+                if(list == null) {
+                    iter.remove();
+                } else{
+                    notifier.notify(list);
+                }
+
+            }
+        }
     }
     
     /**
@@ -80,12 +156,39 @@ public class Listeners<Listener extends EventListener> {
      * @return
      */
     public boolean isListening(EventListener listener) {
-    	// TODO: implement me!
-    	return false;
+        synchronized (lckSt){
+            for (Listener list:strongListeners) {
+                if(list == listener) { return true; }
+            }
+        }
+
+        synchronized (lckWk){
+            Iterator<WeakReference<Listener>> iter = weakListeners.iterator();
+            while (iter.hasNext()) {
+
+                WeakReference<Listener> listRef = iter.next();
+                Listener list = listRef.get();
+
+                if(list == null) {
+                    iter.remove();
+                } else{
+                    if (list == listener) { return true; }
+                }
+
+            }
+        }
+
+        return false;
     }
     
     public void clearListeners() {
-    	// TODO: implement me!
+    	synchronized (lckSt){
+    	    strongListeners.clear();
+        }
+
+        synchronized (lckWk){
+    	    weakListeners.clear();
+        }
     }
     
     /**
@@ -101,8 +204,23 @@ public class Listeners<Listener extends EventListener> {
      * @return
      */
     public int count() {
-    	// TODO: implement me!
-    	return 0;
+
+        // despite the doc-comment the assignment's test expects this to reflect the true number of valid elements
+        // I.e. one has to do null-weak-references purging first
+        synchronized (lckWk){
+            Iterator<WeakReference<Listener>> iter = weakListeners.iterator();
+            while (iter.hasNext()) {
+
+                WeakReference<Listener> listRef = iter.next();
+                Listener list = listRef.get();
+
+                if(list == null) {
+                    iter.remove();
+                }
+            }
+        }
+
+        return weakListeners.size() + strongListeners.size();
     }
     
 }
