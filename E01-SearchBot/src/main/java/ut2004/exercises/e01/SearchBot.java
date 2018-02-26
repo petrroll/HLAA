@@ -4,14 +4,13 @@ import java.util.logging.Level;
 
 import cz.cuni.amis.pogamut.base.communication.worldview.listener.annotation.EventListener;
 import cz.cuni.amis.pogamut.base.utils.guice.AgentScoped;
+import cz.cuni.amis.pogamut.ut2004.agent.module.sensomotoric.UT2004Weaponry;
 import cz.cuni.amis.pogamut.ut2004.agent.module.utils.UT2004Skins;
+import cz.cuni.amis.pogamut.ut2004.agent.navigation.IUT2004Navigation;
 import cz.cuni.amis.pogamut.ut2004.bot.impl.UT2004BotModuleController;
+import cz.cuni.amis.pogamut.ut2004.communication.messages.UT2004ItemType;
 import cz.cuni.amis.pogamut.ut2004.communication.messages.gbcommands.Initialize;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.ConfigChange;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.GameInfo;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.GlobalChat;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.InitedMessage;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.PlayerDamaged;
+import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.*;
 import cz.cuni.amis.pogamut.ut2004.utils.UT2004BotRunner;
 import cz.cuni.amis.utils.exception.PogamutException;
 import ut2004.exercises.e01.checker.CheckerBot;
@@ -38,7 +37,18 @@ import ut2004.exercises.e01.checker.CheckerBot;
  */
 @AgentScoped
 public class SearchBot extends UT2004BotModuleController {
-    
+
+    private enum SearchBotStates {
+        SEARCHING,
+        GOING_TO_PLAYER,
+        GREETING,
+        WAITING_FOR_GREETING_RESPONSE,
+        PREPARING_FOR_FIRE,
+        FIRING,
+        WAITING_FOR_FIRE_RESPONSE,
+        WAITING_FOR_NEXT_ROUND,
+    }
+    private SearchBotStates currentState;
     private int logicIterationNumber;
 
 	/**
@@ -69,6 +79,7 @@ public class SearchBot extends UT2004BotModuleController {
      */
     @Override
     public void beforeFirstLogic() {
+        currentState = SearchBotStates.SEARCHING;
     }
     
     /**
@@ -79,14 +90,37 @@ public class SearchBot extends UT2004BotModuleController {
     	// Simple way to send msg into the UT2004 chat
     	body.getCommunication().sendGlobalTextMessage(msg);
     	// And user log as well
-    	log.info(msg);
+    	log.info("MSG: " + msg);
     }
     
     @EventListener(eventClass=GlobalChat.class)
     public void chatReceived(GlobalChat msg) {
-    	if (msg.getText().toLowerCase().equals("reset")) {
-    		// CheckerBot reset itself...
+        String receivedText = msg.getText();
+
+    	if (receivedText.toLowerCase().equals("reset")) {
+    		currentState = SearchBotStates.SEARCHING;
+    		return;
     	}
+
+    	if(currentState == SearchBotStates.WAITING_FOR_GREETING_RESPONSE){
+            if(receivedText.equals("Hello, my friend!")){
+                currentState = SearchBotStates.PREPARING_FOR_FIRE;
+                log.info("Switched to: " + currentState.name());
+
+                return;
+            }
+        }
+        else if(currentState == SearchBotStates.WAITING_FOR_FIRE_RESPONSE){
+            if(receivedText.equals("COOL!")){
+
+                currentState = SearchBotStates.WAITING_FOR_NEXT_ROUND;
+                log.info("Switched to: " + currentState.name());
+
+                navigation.navigate(navPoints.getRandomNavPoint());
+                return;
+            }
+        }
+
     }
     
     /**
@@ -95,6 +129,16 @@ public class SearchBot extends UT2004BotModuleController {
      */
     @EventListener(eventClass=PlayerDamaged.class)
     public void playerDamaged(PlayerDamaged event) {
+
+        if(currentState == SearchBotStates.FIRING){
+
+            shoot.stopShooting();
+            currentState = SearchBotStates.WAITING_FOR_FIRE_RESPONSE;
+            log.info("Switched to: " + currentState.name());
+
+            return;
+        }
+
     }
 
     /**
@@ -102,8 +146,72 @@ public class SearchBot extends UT2004BotModuleController {
      */
     @Override
     public void logic() throws PogamutException {
-    	log.info("---LOGIC: " + (++logicIterationNumber) + "---");
-  
+        log.info("---LOGIC: " + (++logicIterationNumber) + "---");
+        Player nearestVisiblePlayer = players.getNearestVisiblePlayer();
+
+        if (currentState == SearchBotStates.SEARCHING) {
+
+            if (players.canSeePlayers()) {
+                currentState = SearchBotStates.GOING_TO_PLAYER;
+                log.info("Switched to: " + currentState.name());
+
+                navigation.navigate(nearestVisiblePlayer);
+            }
+
+            if (!navigation.isNavigating()) {
+                navigation.navigate(navPoints.getRandomNavPoint());
+                return;
+            }
+
+        }
+
+        if (currentState == SearchBotStates.GOING_TO_PLAYER) {
+
+            if (nearestVisiblePlayer != null && info.getDistance(nearestVisiblePlayer) < 150) {
+                currentState = SearchBotStates.GREETING;
+                log.info("Switched to: " + currentState.name());
+
+            } else if (!navigation.isNavigating()) {
+                currentState = SearchBotStates.SEARCHING;
+                log.info("Switched to: " + currentState.name());
+                return;
+
+            }
+        }
+
+        if (currentState == SearchBotStates.GREETING) {
+            sayGlobal("Hello!");
+            currentState = SearchBotStates.WAITING_FOR_GREETING_RESPONSE;
+            log.info("Switched to: " + currentState.name());
+
+            return;
+        }
+
+        if (currentState == SearchBotStates.PREPARING_FOR_FIRE) {
+            sayGlobal("I'm not your friend.");
+            weaponry.changeWeapon(UT2004ItemType.ASSAULT_RIFLE);
+
+            currentState = SearchBotStates.FIRING;
+            return; // This state and return is here just to create a delay between the response above and shooting. Without it the checkerBot fails to register the response sometimes.
+        }
+
+        if (currentState == SearchBotStates.FIRING) {
+            if (nearestVisiblePlayer == null) {
+                move.turnHorizontal(30);
+            }
+
+            shoot.shoot(nearestVisiblePlayer);
+            return;
+        }
+
+        if (currentState == SearchBotStates.WAITING_FOR_NEXT_ROUND) {
+            if (!navigation.isNavigating()) {
+                currentState = SearchBotStates.SEARCHING;
+                log.info("Switched to: " + currentState.name());
+
+                return;
+            }
+        }
     }
 
     /**
