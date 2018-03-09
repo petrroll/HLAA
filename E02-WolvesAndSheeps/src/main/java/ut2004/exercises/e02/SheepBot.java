@@ -2,6 +2,7 @@ package ut2004.exercises.e02;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
@@ -80,7 +81,7 @@ public class SheepBot extends UT2004BotModuleController {
      */
     @Override
     public void beforeFirstLogic() {
-    	act.act(new Configuration().setManualSpawn(true));    	
+    	act.act(new Configuration().setManualSpawn(true).setVisionTime(0.1));
     }
      
     @EventListener(eventClass=GlobalChat.class)
@@ -115,13 +116,27 @@ public class SheepBot extends UT2004BotModuleController {
     	logic();
     }
 
+//    private static CountDownLatch cdl = new CountDownLatch(4);
+//    
+//    private boolean a = true;
+    
     /**
      * Main method called 4 times / second. Do your action-selection here.
      */
     @Override
-    public void logic() throws PogamutException {
+    public void logic() throws PogamutException {    	    	
     	if (!Utils.gameRunning) return;
-
+    	
+//    	cdl.countDown();
+//    	try {
+//			cdl.await();
+//		} catch (InterruptedException e) {
+//			e.printStackTrace();
+//		}
+//    	
+//    	if (a) { die(); a = false; }
+    	
+    	
     	int visibleWolfs = 0;
     	for (Player player : players.getVisiblePlayers().values()) {
     		if (Utils.isWolf(player)) {
@@ -147,9 +162,7 @@ public class SheepBot extends UT2004BotModuleController {
     	
     	boolean escapeFirst = firstWolf != null && info.getDistance(firstWolf) < 600;
     	boolean escapeSecond = secondWolf != null && info.getDistance(secondWolf) < 600;
-    	
-    	// CHECK DEATHS
-    	
+    	    	
     	Location force = new Location(0,0,0);
     	
     	if (info.getDistance(firstWolf) < 600) {
