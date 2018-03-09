@@ -1,21 +1,23 @@
 package ut2004.exercises.e02;
 
+import java.util.Collection;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 
 import cz.cuni.amis.pogamut.base.communication.worldview.listener.annotation.EventListener;
 import cz.cuni.amis.pogamut.base.utils.guice.AgentScoped;
+import cz.cuni.amis.pogamut.base.utils.math.DistanceUtils;
+import cz.cuni.amis.pogamut.base3d.worldview.object.Location;
 import cz.cuni.amis.pogamut.ut2004.agent.module.utils.UT2004Skins;
 import cz.cuni.amis.pogamut.ut2004.bot.command.AdvancedLocomotion;
 import cz.cuni.amis.pogamut.ut2004.bot.impl.UT2004BotModuleController;
 import cz.cuni.amis.pogamut.ut2004.communication.messages.gbcommands.Initialize;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.ConfigChange;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.GameInfo;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.GlobalChat;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.InitedMessage;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.PlayerKilled;
+import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.*;
 import cz.cuni.amis.pogamut.ut2004.utils.UT2004BotRunner;
 import cz.cuni.amis.utils.exception.PogamutException;
+
+import javax.vecmath.Vector3d;
 
 /**
  * EXERCISE 02
@@ -54,12 +56,19 @@ import cz.cuni.amis.utils.exception.PogamutException;
 public class WolfBot extends UT2004BotModuleController {
     
 	private static AtomicInteger INSTANCE = new AtomicInteger(1);
-	
+	private static int aliveSheepies; // only wolfie 2 changes, both can read
+
+    private static WolfBot[] wolfies = new WolfBot[2];
+
 	private static Object MUTEX = new Object();
 	
 	private int instance = 0;
-	
     private int logicIterationNumber;
+
+    private Player currentTarget; // expect reference assignment is atomic
+    private WolfBot buddyWolfie; // assume there's only one other wolf
+
+    private boolean ready = false;
 
 	/**
      * Here we can modify initializing command for our bot, e.g., sets its name or skin.
@@ -90,6 +99,7 @@ public class WolfBot extends UT2004BotModuleController {
      */
     @Override
     public void beforeFirstLogic() {
+        wolfies[instance - 1] = this;
     }
     
     /**
@@ -105,6 +115,13 @@ public class WolfBot extends UT2004BotModuleController {
     
     @EventListener(eventClass=GlobalChat.class)
     public void chatReceived(GlobalChat msg) {
+
+        if (instance == 1) Utils.handleMessage(msg);
+        if (instance == 2) {
+            if (msg.getText().toLowerCase().contains("restart")) {
+                aliveSheepies = 12;
+            }
+        }
     }
     
     /**
@@ -112,8 +129,17 @@ public class WolfBot extends UT2004BotModuleController {
      * @param event
      */
     @EventListener(eventClass=PlayerKilled.class)
-    public void playerKilled(PlayerKilled event) {
-    	
+    public synchronized void playerKilled(PlayerKilled event) {
+    	if(instance == 2){
+    	    aliveSheepies -= 1;
+
+    	    if(aliveSheepies <= 0) {
+    	        sayGlobal("restart");
+                aliveSheepies = 12;
+            }
+        }
+
+
     }
     
     /**
@@ -121,8 +147,104 @@ public class WolfBot extends UT2004BotModuleController {
      */
     @Override
     public void logic() throws PogamutException {
-    	log.info("---LOGIC: " + (++logicIterationNumber) + "---");
-  
+    	log.info("---LOGIC(" + instance + ":" + aliveSheepies+ "): " + (++logicIterationNumber) + "---");
+    	if(!ready) {
+            tryToReadyUpAndSetUpConnectionToOtherWolf();
+            return;
+        }
+
+        if(!isGameRunningStartIfAllConnected()){
+            return;
+        }
+
+        Player closestSheep = getClosestSheep();
+        Player viableSheepChasedByBuddy = (instance == 1) ? getViableBuddysTarget(closestSheep) : null;
+
+        currentTarget = (viableSheepChasedByBuddy != null) ? viableSheepChasedByBuddy : closestSheep;
+
+        if(currentTarget == null) {
+            move.turnHorizontal(90);
+            return;
+        }
+
+
+        { // catch target sheep
+
+            log.info("---Target(" + instance +"): " + currentTarget.getId());
+            double distanceToTarget = info.getDistance(currentTarget.getLocation());
+
+            boolean doubleJump = distanceToTarget < 300;
+            double predictionScale = (distanceToTarget < 300)
+                    ? (distanceToTarget < 150 ? 0.2 : 0.5)
+                    : 1;
+
+            // when both chasing the same sheep -> move to further future position with  instance1
+            predictionScale = (instance == 1 && this.currentTarget == buddyWolfie.currentTarget) ? 1 : predictionScale;
+
+            Location futureLocation = currentTarget.getLocation().add(currentTarget.getVelocity().scale(predictionScale));
+            Location directionToFutureLocation = futureLocation.sub(info.getLocation());
+
+
+            move.moveTo(futureLocation);
+            move.dodge(directionToFutureLocation, doubleJump);
+        }
+    }
+
+    private void tryToReadyUpAndSetUpConnectionToOtherWolf() {
+        buddyWolfie = wolfies[instance % 2]; // can be null if not connected yet
+        ready = (buddyWolfie != null);
+    }
+
+    private Player getViableBuddysTarget(Player closestSheep) {
+        Player sheepChasedByBuddy = buddyWolfie.currentTarget;
+
+        if (sheepChasedByBuddy == null || sheepChasedByBuddy.getLocation() == null) {
+            return null;
+        }
+
+        closestSheep = closestSheep != null ? closestSheep : sheepChasedByBuddy;
+
+        Vector3d meToBuddysSheepVector = sheepChasedByBuddy.getLocation().sub(info.getLocation()).getNormalized().asVector3d();
+        double directionVectorSimilarity = sheepChasedByBuddy.getVelocity().normalize().asVector3d().dot(meToBuddysSheepVector);
+        double distanceRatio = info.getDistance(sheepChasedByBuddy) / info.getDistance(closestSheep);
+
+        // runs directly towards me & not extremely far
+        if (directionVectorSimilarity < -0.8 && (closestSheep == null || distanceRatio < 5)){
+            log.info("---BuddySheep(" + instance +"): " + sheepChasedByBuddy.getId() + " directly towards me.");
+            return sheepChasedByBuddy;
+        }
+
+        // doesn't run directly towards me but is close enough
+        if (directionVectorSimilarity < 0 && (closestSheep == null || distanceRatio < 2)) {
+            log.info("---BuddySheep(" + instance +"): " + sheepChasedByBuddy.getId() + " reasonably towards me & close.");
+            return sheepChasedByBuddy;
+        }
+
+        log.info("---NoBuddySheep(" + instance +"): " + sheepChasedByBuddy.getId() + ":" + directionVectorSimilarity + ":" + distanceRatio);
+        return null;
+    }
+
+    private Player getClosestSheep() {
+        Collection<Player> visibleSheep = players.getVisibleEnemies().values().stream().filter(p -> Utils.isSheep(p) && p.getLocation() != null).collect(Collectors.toList());
+        return DistanceUtils.getNearest(visibleSheep, info.getLocation());
+    }
+
+    private boolean isGameRunningStartIfAllConnected() {
+        if (Utils.gameRunning) {
+            return true;
+        }
+
+        Collection<Player> bots = players.getPlayers().values();
+        if (bots.size() == 14 && this.ready && this.buddyWolfie.ready) {
+
+            if (this.instance == 2) {
+                sayGlobal("start");
+                aliveSheepies = 12;
+            }
+        }
+
+        return  false;
+
     }
 
     /**
