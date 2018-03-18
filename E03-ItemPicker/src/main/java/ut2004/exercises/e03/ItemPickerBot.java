@@ -70,13 +70,10 @@ import ut2004.exercises.e03.comm.TCItemPicked;
 public class ItemPickerBot extends UT2004BotTCController {
 
     private static AtomicInteger INSTANCE = new AtomicInteger(1);
-
     private static Object MUTEX = new Object();
-
     private int instance = 0;
 
     private int logicIterationNumber;
-
     private long lastLogicTime = -1;
 
     Set<UnrealId> pickedItems = new HashSet<UnrealId>();
@@ -134,6 +131,10 @@ public class ItemPickerBot extends UT2004BotTCController {
         if(item == null)
             return false;
 
+        if (!items.isPickable(item)) {
+            return false;
+        }
+
         // not already picked items
         if (pickedItems.contains(item.getId()))
             return false;
@@ -183,8 +184,7 @@ public class ItemPickerBot extends UT2004BotTCController {
      */
     @Override
     public void logic() throws PogamutException {
-        log.info("---LOGIC: " + (++logicIterationNumber) + "---");
-        if (lastLogicTime > 0) log.info("   DELTA: " + (System.currentTimeMillis()-lastLogicTime + "ms"));
+        log.info( instance+ ":LOGIC: " + (++logicIterationNumber) + ":");
         lastLogicTime = System.currentTimeMillis();
 
         if (!tcClient.isConnected()) {
