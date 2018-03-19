@@ -131,10 +131,6 @@ public class ItemPickerBot extends UT2004BotTCController {
         if(item == null)
             return false;
 
-        if (!items.isPickable(item)) {
-            return false;
-        }
-
         // not already picked items
         if (pickedItems.contains(item.getId()))
             return false;
