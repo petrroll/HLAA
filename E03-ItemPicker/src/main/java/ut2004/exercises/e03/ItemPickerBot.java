@@ -1,9 +1,7 @@
 package ut2004.exercises.e03;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
@@ -31,6 +29,7 @@ import cz.cuni.amis.utils.IFilter;
 import cz.cuni.amis.utils.collections.MyCollections;
 import cz.cuni.amis.utils.exception.PogamutException;
 import ut2004.exercises.e03.comm.TCItemPicked;
+import ut2004.exercises.e03.comm.TCItemPursuing;
 
 /**
  * EXERCISE 03
@@ -76,7 +75,17 @@ public class ItemPickerBot extends UT2004BotTCController {
     private int logicIterationNumber;
     private long lastLogicTime = -1;
 
+    private Item currentlyPursuedItem = null;
+
     Set<UnrealId> pickedItems = new HashSet<UnrealId>();
+    Set<UnrealId> someOneIsPursuing = new HashSet<UnrealId>();
+
+    State currState = State.ChoosingItem;
+    enum State {
+        ChoosingItem,
+        RunningToItem,
+        RepickingItem,
+    }
 
     /**
      * Here we can modify initializing command for our bot, e.g., sets its name or skin.
@@ -127,6 +136,159 @@ public class ItemPickerBot extends UT2004BotTCController {
     public void chatReceived(GlobalChat msg) {
     }
 
+
+    /**
+     * THIS BOT has picked an item!
+     * @param event
+     */
+    @EventListener(eventClass=ItemPickedUp.class)
+    public void itemPickedUp(ItemPickedUp event) {
+        Item item = items.getItem(event.getId());
+        if (!isInteresting(item)){
+            return;
+        }
+
+        notifyCheckerAboutInterestingItem(item);
+    }
+
+    /**
+     * Someone else picked an item!
+     * @param event
+     */
+    @EventListener(eventClass = TCItemPicked.class)
+    public void tcItemPicked(TCItemPicked event) {
+        UnrealId itemPickedId = event.getWhat();
+        UnrealId whoPickedTheItemId = event.getWho();
+
+        logAsMe("Received info about item picked:" + whoPickedTheItemId + ":" + itemPickedId
+                + "|" + "wasPursuing:" + ((currentlyPursuedItem != null) ? currentlyPursuedItem.getId() : "Null"));
+
+        this.pickedItems.add(itemPickedId);
+        if (isCurrentlyPursuedItemEqualTo(itemPickedId)) {
+            logAsMe("Somebody took my item: " + whoPickedTheItemId + ":" + currentlyPursuedItem.getId());
+            transitionToChoosingNewItem();
+        }
+    }
+
+
+
+    /**
+     * Someone else picked an item!
+     * @param event
+     */
+    @EventListener(eventClass = TCItemPursuing.class)
+    public void tcItemBeingPursued(TCItemPursuing event) {
+        logAsMe("Received info about someone PursuingItem:" + event.getWho() + ":" + event.getWhat()
+                + "|" + "wasPursuing:" + ((currentlyPursuedItem != null) ? currentlyPursuedItem.getId() : "Null"));
+
+
+        if(isCurrentlyPursuedItemEqualTo(event.getWhat())){
+            // we are both pursuing the same item
+            double distanceToCurrentlyPursued = navMeshModule.getAStarPathPlanner().getDistance(info.getLocation(), currentlyPursuedItem);
+
+            logAsMe("Somebody is going after my item: " + event.getWho() + ":" + currentlyPursuedItem.getId());
+            //transitionToChoosingNewItem();
+
+        } else {
+            this.someOneIsPursuing.add(event.getWhat());
+        }
+    }
+
+
+    /**
+     * Main method called 4 times / second. Do your action-selection here.
+     */
+    @Override
+    public void logic() throws PogamutException {
+        ++logicIterationNumber;
+        lastLogicTime = System.currentTimeMillis();
+
+        if (isSomethingNotInitializedOrGameNotRunning()) return;
+
+        switch (currState) {
+            case ChoosingItem:
+                chooseNewItem();
+                break;
+            case RunningToItem:
+                notifyOthersAboutRunningToAnItem();
+                break;
+            case RepickingItem:
+                notifyCheckerAboutInterestingItem(currentlyPursuedItem);
+                break;
+        }
+    }
+
+
+    private void transitionToChoosingNewItem() {
+        logAsMe("Transitioning to choosing a new item.");
+
+        currState = State.ChoosingItem;
+        currentlyPursuedItem = null;
+    }
+
+    private void notifyOthersAboutRunningToAnItem() {
+        assert currentlyPursuedItem != null;
+        double distanceToCurrentlyPursued = navMeshModule.getAStarPathPlanner().getDistance(info.getLocation(), currentlyPursuedItem);
+        this.tcClient.sendToTeamOthers(new TCItemPursuing(info.getId(), currentlyPursuedItem.getId(), distanceToCurrentlyPursued));
+    }
+
+    private void chooseNewItem() {
+        assert currentlyPursuedItem == null;
+        currentlyPursuedItem = getNearestInterestingItem();
+        logAsMe("Currently pursued item is: " + info.getId() + ":" + currentlyPursuedItem.getId());
+
+        if (currentlyPursuedItem != null) {
+            navigation.navigate(currentlyPursuedItem);
+            currState = State.RunningToItem;
+        } else if (!navigation.isNavigating()) {
+            navigation.navigate(navPoints.getRandomNavPoint());
+        }
+    }
+
+    private Item getNearestInterestingItem() {
+
+        Collection<Item> items = MyCollections.getFiltered(
+                this.items.getSpawnedItems().values(),
+                new IFilter<Item>() {
+                    @Override
+                    public boolean isAccepted(Item arg0){
+                        return isInteresting(arg0);
+                    }
+                });
+
+        Item nearestItemLocation = DistanceUtils.getNearest(items, info.getLocation(), new IGetDistance<Item>(){
+            @Override
+            public double getDistance(Item item, ILocated arg1){
+                return navMeshModule.getAStarPathPlanner().getDistance(item,  arg1);
+
+            }
+        });
+        return nearestItemLocation;
+    }
+
+    private void notifyCheckerAboutInterestingItem(Item item) {
+        if (ItemPickerChecker.itemPicked(info.getId(), item)) {
+            logAsMe("I picked up: " + info.getId() + ":" + item.getId());
+            this.tcClient.sendToTeam(new TCItemPicked(info.getId(), item.getId()));
+        } else {
+            // should not happen... but if you encounter this, just wait with the bot a cycle and report item picked again
+            log.severe("SHOULD NOT BE HAPPNEINING! ItemPickerChecker refused our item!");
+            transitionToRepickingAnItem(item);
+        }
+    }
+
+    private void transitionToRepickingAnItem(Item item) {
+        logAsMe("I'm starting to repick: " + info.getId() + ":" + item.getId());
+
+        navigation.navigate(item);
+        currentlyPursuedItem = item;
+        currState = State.RepickingItem;
+    }
+
+    private boolean isCurrentlyPursuedItemEqualTo(UnrealId itemId) {
+        return currentlyPursuedItem != null && itemId.equals(currentlyPursuedItem.getId());
+    }
+
     public boolean isInteresting(Item item){
         if(item == null)
             return false;
@@ -146,87 +308,23 @@ public class ItemPickerBot extends UT2004BotTCController {
                 category == ItemType.Category.SHIELD);
     }
 
-    /**
-     * THIS BOT has picked an item!
-     * @param event
-     */
-    @EventListener(eventClass=ItemPickedUp.class)
-    public void itemPickedUp(ItemPickedUp event) {
-        Item item = items.getItem(event.getId());
-        if (!isInteresting(item)){
-            return;
-        }
-
-        if (ItemPickerChecker.itemPicked(info.getId(), item)) {
-            this.tcClient.sendToTeam(new TCItemPicked(info.getId(), event.getId()));
-            // AN ITEM HAD BEEN PICKED + ACKNOWLEDGED BY ItemPickerChecker
-        } else {
-            // should not happen... but if you encounter this, just wait with the bot a cycle and report item picked again
-            log.severe("SHOULD NOT BE HAPPNEINING! ItemPickerChecker refused our item!");
-        }
+    private void logAsMe(String s){
+        log.info( instance+ ": " + logicIterationNumber + ":" + s);
     }
 
-    /**
-     * Someone else picked an item!
-     * @param event
-     */
-    @EventListener(eventClass = TCItemPicked.class)
-    public void tcItemPicked(TCItemPicked event) {
-        this.pickedItems.add(event.getWhat());
-    }
 
-    /**
-     * Main method called 4 times / second. Do your action-selection here.
-     */
-    @Override
-    public void logic() throws PogamutException {
-        log.info( instance+ ":LOGIC: " + (++logicIterationNumber) + ":");
-        lastLogicTime = System.currentTimeMillis();
-
+    private boolean isSomethingNotInitializedOrGameNotRunning() {
         if (!tcClient.isConnected()) {
             log.warning("TeamComm not running!");
-            return;
+            return true;
         }
 
 
-        if (!ItemPickerChecker.isRunning()) return;
-        if (!ItemPickerChecker.isInited()) return;
-        if (ItemPickerChecker.isVictory()) {
-            return;
-        }
+        if (!ItemPickerChecker.isRunning()) return true;
+        if (!ItemPickerChecker.isInited()) return true;
+        if (ItemPickerChecker.isVictory()) return true;
 
-
-        if(!navigation.isNavigating()){
-            Item nearestItem = getNearestInterstingItem();
-
-            if(nearestItem != null){
-                navigation.navigate(nearestItem);;
-            } else {
-                navigation.navigate(navPoints.getRandomNavPoint());;
-            }
-        }
-
-    }
-
-    private Item getNearestInterstingItem() {
-
-        Collection<Item> items = MyCollections.getFiltered(
-                this.items.getSpawnedItems().values(),
-                new IFilter<Item>() {
-                    @Override
-                    public boolean isAccepted(Item arg0){
-                        return isInteresting(arg0);
-                    }
-                });
-
-        Item nearestItemLocation = DistanceUtils.getNearest(items, info.getLocation(), new IGetDistance<Item>(){
-            @Override
-            public double getDistance(Item item, ILocated arg1){
-                return navMeshModule.getAStarPathPlanner().getDistance(item,  arg1);
-
-            }
-        });
-        return nearestItemLocation;
+        return false;
     }
 
     /**
