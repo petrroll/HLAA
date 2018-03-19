@@ -23,7 +23,9 @@ import cz.cuni.amis.pogamut.ut2004.server.impl.UT2004Server;
  * @author Jimmy
  */
 public class ItemPickerChecker {
-	
+
+	private static boolean isInited = false;
+
 	public static final int BOTS_COUNT = 3; 
 	
 	private static Set<UnrealId> picked = new HashSet<UnrealId>();
@@ -56,6 +58,7 @@ public class ItemPickerChecker {
 			}
 		});
 	}
+
 	
 	private static int state = 0;
 	
@@ -89,6 +92,8 @@ public class ItemPickerChecker {
 			getServer().getLog().warning("ITEM TO PICK: " + item);			
 		}
 		getServer().getLog().warning("+-- total: " + itemsToPick.values().size());
+
+		isInited = true;
 	}
 	
 	public synchronized static void register(UnrealId botId) {
@@ -109,6 +114,10 @@ public class ItemPickerChecker {
 		
 		getServer().getLog().warning("YOU HAVE WON! Time: " + (endTime - startTime) + "ms");
 		return false;
+	}
+
+	public static boolean isInited(){
+		return isInited;
 	}
 	
 	public synchronized static boolean itemPicked(UnrealId who, Item what) {

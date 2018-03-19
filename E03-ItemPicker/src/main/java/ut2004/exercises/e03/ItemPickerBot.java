@@ -194,6 +194,7 @@ public class ItemPickerBot extends UT2004BotTCController {
 
 
         if (!ItemPickerChecker.isRunning()) return;
+        if (!ItemPickerChecker.isInited()) return;
         if (ItemPickerChecker.isVictory()) {
             return;
         }
