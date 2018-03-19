@@ -304,9 +304,9 @@ public class ItemPickerBot extends UT2004BotTCController {
     private void chooseNewItem() {
         assert currentlyPursuedItem == null;
         currentlyPursuedItem = getNearestInterestingItemNearerToMeThanToBuddies();
-        logAsMe("Currently pursued item is: " + info.getId() + ":" + currentlyPursuedItem.getId());
 
         if (currentlyPursuedItem != null) {
+            logAsMe("Currently pursued item is: " + info.getId() + ":" + currentlyPursuedItem.getId());
             navigation.navigate(currentlyPursuedItem);
             currState = State.RunningToItem;
         } else if (!navigation.isNavigating()) {
@@ -332,7 +332,7 @@ public class ItemPickerBot extends UT2004BotTCController {
                 Double theirDistance = someOneIsPursuing.get(item);
 
                 if(theirDistance != null){
-                    return (theirDistance < myDistance) ? Double.MAX_VALUE : myDistance;
+                    return (0.8d * theirDistance < myDistance) ? Double.MAX_VALUE : myDistance; // only take an item if I'm reasonable closer
                 }
 
                 return myDistance;
