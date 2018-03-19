@@ -26,7 +26,7 @@ public class ItemPickerChecker {
 
 	private static boolean isInited = false;
 
-	public static final int BOTS_COUNT = 3; 
+	public static final int BOTS_COUNT = 3;
 	
 	private static Set<UnrealId> picked = new HashSet<UnrealId>();
 	

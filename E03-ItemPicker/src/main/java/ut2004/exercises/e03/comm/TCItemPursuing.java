@@ -20,10 +20,17 @@ public class TCItemPursuing extends TCMessageData {
 
 	private double dist;
 
-	public TCItemPursuing(UnrealId who, UnrealId what, double currentDistanceTo) {
+	private Type type;
+
+	public TCItemPursuing(UnrealId who, UnrealId what, double currentDistanceTo, Type type) {
 		this.who = who;
 		this.what = what;
-		this.dist = dist;
+		this.dist = currentDistanceTo;
+		this.type = type;
+	}
+
+	public TCItemPursuing(UnrealId who, UnrealId what, double currentDistanceTo) {
+		this(who, what, currentDistanceTo, Type.StartingToPursue);
 	}
 
 	public UnrealId getWho() {
@@ -42,6 +49,17 @@ public class TCItemPursuing extends TCMessageData {
 		this.what = what;
 	}
 
-	public double getDistance(){ return dist; }
+	public double getDistance() {
+		return dist;
+	}
 
+	public Type getType() {
+		return this.type;
+	}
+
+	public enum Type {
+		StartingToPursue,
+		ConflictIWantToPursue,
+		ConflictYouWon,
+	}
 }

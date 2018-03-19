@@ -1,8 +1,6 @@
 package ut2004.exercises.e03;
 
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 
@@ -76,15 +74,16 @@ public class ItemPickerBot extends UT2004BotTCController {
     private long lastLogicTime = -1;
 
     private Item currentlyPursuedItem = null;
+    static int CURR_LOGGING_LEVEL = 0;
 
     Set<UnrealId> pickedItems = new HashSet<UnrealId>();
-    Set<UnrealId> someOneIsPursuing = new HashSet<UnrealId>();
+    Map<UnrealId, Double> someOneIsPursuing = new HashMap<UnrealId, Double>();
 
     State currState = State.ChoosingItem;
     enum State {
         ChoosingItem,
         RunningToItem,
-        RepickingItem,
+        RepickingItem, NegotiatingWhoIsCloserWaitingForReponse,
     }
 
     /**
@@ -179,19 +178,85 @@ public class ItemPickerBot extends UT2004BotTCController {
     @EventListener(eventClass = TCItemPursuing.class)
     public void tcItemBeingPursued(TCItemPursuing event) {
         logAsMe("Received info about someone PursuingItem:" + event.getWho() + ":" + event.getWhat()
-                + "|" + "wasPursuing:" + ((currentlyPursuedItem != null) ? currentlyPursuedItem.getId() : "Null"));
+                + "|" + "wasPursuing:" + ((currentlyPursuedItem != null) ? currentlyPursuedItem.getId() : "Null"), -1);
+
+        UnrealId itemPursuedBySomeOneElse = event.getWhat();
+        double pursueeDistance = event.getDistance();
 
 
-        if(isCurrentlyPursuedItemEqualTo(event.getWhat())){
-            // we are both pursuing the same item
-            double distanceToCurrentlyPursued = navMeshModule.getAStarPathPlanner().getDistance(info.getLocation(), currentlyPursuedItem);
-
-            logAsMe("Somebody is going after my item: " + event.getWho() + ":" + currentlyPursuedItem.getId());
-            //transitionToChoosingNewItem();
-
-        } else {
-            this.someOneIsPursuing.add(event.getWhat());
+        switch (event.getType()){
+            case StartingToPursue:
+                if(!isCurrentlyPursuedItemEqualTo(itemPursuedBySomeOneElse)){
+                    this.someOneIsPursuing.put(itemPursuedBySomeOneElse, pursueeDistance);
+                } else {
+                    handleSomeonePursuingMyItem(event.getWho(), itemPursuedBySomeOneElse, pursueeDistance);
+                }
+                break;
+            case ConflictIWantToPursue:
+                someoneElseWantsToPursueMyObject(event.getWho(), itemPursuedBySomeOneElse, pursueeDistance);
+                break;
+            case ConflictYouWon:
+                assert  currentlyPursuedItem != null;
+                currState = State.RunningToItem;
+                break;
         }
+
+    }
+
+    private void someoneElseWantsToPursueMyObject(UnrealId pursuee, UnrealId itemPursuedBySomeOneElse, double pursueeDistance) {
+        if(currState == State.NegotiatingWhoIsCloserWaitingForReponse) {
+
+            logAsMe("Someone:" + pursuee + " thinks it's closer and I think to the same, let hashCode choose the winner.");
+
+            // I know we both think we're closer & we both send the ConflictIWantToPursue message -> pick one arbitrarily that will continue to pursue
+            // ... .hashcode is stable so let's use it to determine which one will continue, the loosing party will stop navigating, penalize the item
+            // ... and switch to lookingForNewItem state
+
+            if(info.getId().hashCode() < pursuee.hashCode()){
+                logAsMe("Lost, transitioning to choosing new item!");
+
+                // temporal penalization so that the same item isn't likely to be chosen again
+                someOneIsPursuing.put(pursuee, pursueeDistance * 0.5);
+                transitionToChoosingNewItem();
+                this.tcClient.sendToBot(pursuee, new TCItemPursuing(info.getId(), currentlyPursuedItem.getId(), 0, TCItemPursuing.Type.ConflictYouWon));
+            }
+            else{
+
+                logAsMe("Won, continuing to pursue the item!");
+
+                assert  currentlyPursuedItem != null;
+                currState = State.RunningToItem;
+            }
+
+        } else if (currState != State.ChoosingItem) {
+            handleSomeonePursuingMyItem(pursuee, itemPursuedBySomeOneElse, pursueeDistance);
+        } else {
+            // this can happen if somebody picks the item during negotiation
+            this.tcClient.sendToBot(pursuee, new TCItemPursuing(info.getId(), itemPursuedBySomeOneElse, 0, TCItemPursuing.Type.ConflictYouWon));
+        }
+
+    }
+
+    private boolean handleSomeonePursuingMyItem(UnrealId pursuee, UnrealId itemPursuedBySomeOneElse, double pursueeDistance) {
+        assert  currentlyPursuedItem != null;
+        double myDistance = navMeshModule.getAStarPathPlanner().getDistance(info.getLocation(), currentlyPursuedItem);
+
+        logAsMe("Someone:" + pursuee + "is pursuing my item | their distance: " + pursueeDistance + "| my distance" + myDistance);
+        if (myDistance > pursueeDistance){
+
+            this.someOneIsPursuing.put(itemPursuedBySomeOneElse, pursueeDistance);
+            transitionToChoosingNewItem();
+
+            return true;
+        } else {
+            logAsMe("Switching to negotiating mode, waiting for response");
+
+
+            navigation.stopNavigation();
+            this.currState = State.NegotiatingWhoIsCloserWaitingForReponse;
+            this.tcClient.sendToBot(pursuee, new TCItemPursuing(info.getId(), currentlyPursuedItem.getId(), myDistance, TCItemPursuing.Type.ConflictIWantToPursue));
+        }
+        return false;
     }
 
 
@@ -205,6 +270,7 @@ public class ItemPickerBot extends UT2004BotTCController {
 
         if (isSomethingNotInitializedOrGameNotRunning()) return;
 
+
         switch (currState) {
             case ChoosingItem:
                 chooseNewItem();
@@ -215,6 +281,9 @@ public class ItemPickerBot extends UT2004BotTCController {
             case RepickingItem:
                 notifyCheckerAboutInterestingItem(currentlyPursuedItem);
                 break;
+            case NegotiatingWhoIsCloserWaitingForReponse:
+                break;
+
         }
     }
 
@@ -234,7 +303,7 @@ public class ItemPickerBot extends UT2004BotTCController {
 
     private void chooseNewItem() {
         assert currentlyPursuedItem == null;
-        currentlyPursuedItem = getNearestInterestingItem();
+        currentlyPursuedItem = getNearestInterestingItemNearerToMeThanToBuddies();
         logAsMe("Currently pursued item is: " + info.getId() + ":" + currentlyPursuedItem.getId());
 
         if (currentlyPursuedItem != null) {
@@ -245,7 +314,7 @@ public class ItemPickerBot extends UT2004BotTCController {
         }
     }
 
-    private Item getNearestInterestingItem() {
+    private Item getNearestInterestingItemNearerToMeThanToBuddies() {
 
         Collection<Item> items = MyCollections.getFiltered(
                 this.items.getSpawnedItems().values(),
@@ -259,8 +328,14 @@ public class ItemPickerBot extends UT2004BotTCController {
         Item nearestItemLocation = DistanceUtils.getNearest(items, info.getLocation(), new IGetDistance<Item>(){
             @Override
             public double getDistance(Item item, ILocated arg1){
-                return navMeshModule.getAStarPathPlanner().getDistance(item,  arg1);
+                double myDistance = navMeshModule.getAStarPathPlanner().getDistance(item,  arg1);
+                Double theirDistance = someOneIsPursuing.get(item);
 
+                if(theirDistance != null){
+                    return (theirDistance < myDistance) ? Double.MAX_VALUE : myDistance;
+                }
+
+                return myDistance;
             }
         });
         return nearestItemLocation;
@@ -308,8 +383,14 @@ public class ItemPickerBot extends UT2004BotTCController {
                 category == ItemType.Category.SHIELD);
     }
 
+    private void logAsMe(String s, int level){
+        if (level >= CURR_LOGGING_LEVEL){
+            log.info( instance+ ": " + logicIterationNumber + ":" + s);
+
+        }
+    }
     private void logAsMe(String s){
-        log.info( instance+ ": " + logicIterationNumber + ":" + s);
+        logAsMe(s, 0);
     }
 
 
