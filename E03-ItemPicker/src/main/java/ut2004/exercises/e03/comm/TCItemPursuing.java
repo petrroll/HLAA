@@ -30,7 +30,7 @@ public class TCItemPursuing extends TCMessageData {
 	}
 
 	public TCItemPursuing(UnrealId who, UnrealId what, double currentDistanceTo) {
-		this(who, what, currentDistanceTo, Type.StartingToPursue);
+		this(who, what, currentDistanceTo, Type.PursuingInfo);
 	}
 
 	public UnrealId getWho() {
@@ -58,8 +58,8 @@ public class TCItemPursuing extends TCMessageData {
 	}
 
 	public enum Type {
-		StartingToPursue,
+		PursuingInfo,
 		ConflictIWantToPursue,
-		ConflictYouWon,
+		GaveUpOnItem,
 	}
 }
