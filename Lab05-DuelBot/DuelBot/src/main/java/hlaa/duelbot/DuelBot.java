@@ -1,22 +1,27 @@
 package hlaa.duelbot;
 
+import java.util.Collection;
+import java.util.function.IntToDoubleFunction;
+import java.util.function.ToDoubleBiFunction;
 import java.util.logging.Level;
 
 import cz.cuni.amis.pogamut.base.communication.worldview.listener.annotation.EventListener;
 import cz.cuni.amis.pogamut.base.utils.guice.AgentScoped;
+import cz.cuni.amis.pogamut.base.utils.math.DistanceUtils;
+import cz.cuni.amis.pogamut.base3d.worldview.object.ILocated;
 import cz.cuni.amis.pogamut.ut2004.agent.navigation.NavigationState;
 import cz.cuni.amis.pogamut.ut2004.bot.impl.UT2004BotModuleController;
+import cz.cuni.amis.pogamut.ut2004.communication.messages.ItemType;
+import cz.cuni.amis.pogamut.ut2004.communication.messages.UT2004ItemType;
 import cz.cuni.amis.pogamut.ut2004.communication.messages.gbcommands.Initialize;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.BotDamaged;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.BotKilled;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.ConfigChange;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.GameInfo;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.InitedMessage;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.ItemPickedUp;
-import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.Self;
+import cz.cuni.amis.pogamut.ut2004.communication.messages.gbinfomessages.*;
 import cz.cuni.amis.pogamut.ut2004.utils.UT2004BotRunner;
+import cz.cuni.amis.utils.IFilter;
+import cz.cuni.amis.utils.collections.MyCollections;
 import cz.cuni.amis.utils.exception.PogamutException;
 import cz.cuni.amis.utils.flag.FlagListener;
+import java.util.function.Predicate;
+
 
 @AgentScoped
 public class DuelBot extends UT2004BotModuleController {
@@ -63,6 +68,14 @@ public class DuelBot extends UT2004BotModuleController {
     @Override
     public void beforeFirstLogic() {
     }
+
+    private int getHealthAmount(Item itm){
+        if(itm.getType().equals(UT2004ItemType.HEALTH_PACK)) return 25;
+        else if(itm.getType().equals(UT2004ItemType.MINI_HEALTH_PACK)) return 5;
+        else if(itm.getType().equals(UT2004ItemType.MINI_HEALTH_PACK)) return 100;
+
+        return 0;
+    }
         
     @Override
     public void logic() throws PogamutException {
@@ -74,10 +87,17 @@ public class DuelBot extends UT2004BotModuleController {
     	log.info("---LOGIC: " + (++logicIterationNumber) + " / D=" + (System.currentTimeMillis() - lastLogicTime) + "ms ---");
     	lastLogicTime = System.currentTimeMillis();
 
+        Collection<Item> items = MyCollections.getFiltered(this.items.getSpawnedItems().values(), (IFilter<Item>) arg0 -> arg0.getType().getCategory() == ItemType.Category.HEALTH);
+
+        Item nearestItemLocation = DistanceUtils.getNearest(items, info.getLocation(), (DistanceUtils.IGetDistance<Item>) (item, myLocation) -> {
+            return navMeshModule.getAStarPathPlanner().getDistance(item, myLocation);
+        });
+
+
     	// FOLLOWS THE BOT'S LOGIC
     	
     }
-    
+
     // ==============
     // EVENT HANDLERS
     // ==============
