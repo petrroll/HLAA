@@ -1,9 +1,7 @@
 package tdm;
 
 import java.awt.Color;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.ToDoubleBiFunction;
 import java.util.function.ToIntFunction;
@@ -57,6 +55,9 @@ import cz.cuni.amis.utils.exception.PogamutException;
 import math.geom2d.Vector2D;
 import tdm.tc.TDMCommItems;
 import tdm.tc.TDMCommObjectUpdates;
+import tdm.tc.msgs.TCItemPursuing;
+
+import static cz.cuni.amis.utils.collections.MyCollections.getFiltered;
 
 /**
  * TDM BOT TEMPLATE CLASS
@@ -70,13 +71,13 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
 	/**
 	 * TRUE => draws navmesh and terminates
 	 */
-	public static final boolean DRAW_NAVMESH = true;
+	public static final boolean DRAW_NAVMESH = false;
 	private static boolean navmeshDrawn = false;
 	
 	/**
 	 * TRUE => rebinds NAVMESH+NAVIGATION GRAPH; useful when you add new map tweak into {@link MapTweaks}.
 	 */
-	public static final boolean UPDATE_NAVMESH = true;
+	public static final boolean UPDATE_NAVMESH = false;
 	
 	/**
 	 * Whether to draw navigation path; works only if you are running 1 bot...
@@ -117,7 +118,7 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
 
 
     // =============
-    // BOT parameters
+    // BOT parameters and variables
     // =============
     private long   lastLogicTime        = -1;
     private long   logicIterationNumber = 0;
@@ -134,9 +135,28 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
     Heatup shotAt = new Heatup(500);
     String shotAtWith = "";
 
+    Map<UnrealId, PursueInfo> someOneIsPursuing = new HashMap<UnrealId, PursueInfo>();
 
     private final int RUN_TO_COVER_HEALTH_THRESHOLD = 25;
     private final int PREFER_HEALTH_WHEN_PICKUP_STUFF_HEALTH_THRESHOLD = 75;
+
+    private class PursueInfo{
+        private double distance;
+        private Heatup heatup;
+
+        public PursueInfo(double dist, Heatup heat){
+            distance = dist;
+            heatup = heat;
+        }
+
+        public double getDistance() {
+            return distance;
+        }
+
+        public Heatup getHeatup() {
+            return heatup;
+        }
+    }
 
     // =============
     // BOT LIFECYCLE
@@ -452,6 +472,17 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
     	
     }
 
+    /**
+     * Someone else picked an item!
+     * @param event
+     */
+    @EventListener(eventClass = TCItemPursuing.class)
+    public void tcItemBeingPursued(TCItemPursuing event) {
+        Heatup htp = new Heatup((long)(event.getDistance() * 10));
+        htp.heat();
+        this.someOneIsPursuing.put(event.getWhat(), new PursueInfo(event.getDistance(), htp));
+    }
+
     // ========
     // CONSTANTS COUNTING
     // ========
@@ -728,7 +759,7 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
 
         if (bestPickup != null){
             log.info("Moving for pickup:" + bestPickup);
-            navigation.navigate(bestPickup);
+            pursueToPickup(bestPickup);
             return  true;
         }
         return false;
@@ -750,7 +781,7 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
                     (ToDoubleBiFunction<Item, Double>) (item, dist) -> dist / weaponScore.applyAsInt(item));
 
             if (bestWeapon != null && weaponScore.applyAsInt(bestWeapon) > currentLevel){
-                navigation.navigate(bestWeapon);
+                pursueToPickup(bestWeapon);
                 log.info("Moving for weapons:" + bestWeapon);
                 return true;
             }
@@ -775,7 +806,7 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
 
         if (closestHealth != null){
             log.info("Moving for medpack:" + closestHealth);
-            navigation.navigate(closestHealth);
+            pursueToPickup(closestHealth);
             return true;
         }
         return false;
@@ -783,7 +814,7 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
 
 
     private Item getBestInterestingItem(IFilter<Item> interestingFilter, ToDoubleBiFunction<Item, Double> scoreItem) {
-        Collection<Item> items = MyCollections.getFiltered(this.items.getSpawnedItems().values(), interestingFilter);
+        Collection<Item> items = getFiltered(this.items.getSpawnedItems().values(), interestingFilter);
 
         Item nearestItemLocation = DistanceUtils.getNearest(items, info.getLocation(), (DistanceUtils.IGetDistance<Item>) (item, myLocation) -> {
             double myDistance = Double.MAX_VALUE;
@@ -791,10 +822,33 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
                 myDistance = navMeshModule.getAStarPathPlanner().getDistance(item.getLocation(), myLocation);
             } catch (NullPointerException ex) {}
 
+            // If someone is pursuing and I'm further make my distance 10-times further to discourage pursuing
+            if (someOneIsPursuing.containsKey(item.getId())){
+                PursueInfo nfo = someOneIsPursuing.get(item.getId());
+                if (nfo.getHeatup().isHot()){
+                    if(nfo.distance < myDistance){
+                        myDistance *= 10;
+                    }
+                }
+                else {
+                    someOneIsPursuing.remove(item.getId());
+                }
+            }
+
             return scoreItem.applyAsDouble(item, myDistance);
         });
 
         return nearestItemLocation;
+    }
+
+    private void pursueToPickup(Item item){
+
+        // I know I'm recomputing a value I should be able to have here -> temporal solution
+        double distanceToCurrentlyPursued = navMeshModule.getAStarPathPlanner().getDistance(info.getLocation(), item);
+        this.tcClient.sendToTeamOthers(new TCItemPursuing(info.getId(), item.getId(), distanceToCurrentlyPursued));
+
+        navigation.navigate(item);
+
     }
     
     // ===========
