@@ -674,6 +674,11 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
         tryToSenseAndUpdateEnemy();
         if (pursueEnemy.isCool()) return false;
 
+        navigation.setFocus(pursuedEnemy);
+        if (pursuedEnemy.isVisible()) {
+            shootEnemy(pursuedEnemy);
+        }
+
         if (runToCoverIfSeriouslyInjured()) return true;
 
         log.info("Pursuing enemy:" + pursuedEnemy);
@@ -682,11 +687,6 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
             navigation.navigate(pursuedEnemy);
         } else {
             fleeFromEnemy();
-        }
-
-
-        if (pursuedEnemy.isVisible()) {
-            shootEnemy(pursuedEnemy);
         }
 
         return true;
@@ -722,7 +722,7 @@ public class TDMBot extends UT2004BotTCController<UT2004Bot> {
     }
 
     private boolean tryToSenseAndUpdateEnemy() {
-        Player veryRecentEnemy = players.getNearestEnemy(300);
+        Player veryRecentEnemy = players.getNearestEnemy(500);
         if(veryRecentEnemy == null) return false;
 
         pursuedEnemy = veryRecentEnemy;
